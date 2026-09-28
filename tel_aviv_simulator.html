@@ -1,0 +1,238 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Senja di Tel Aviv — FPS</title>
+<link href="https://fonts.googleapis.com/css2?family=Heebo:wght@500;800&display=swap" rel="stylesheet">
+<style>
+:root{--bg:#14202b;--fg:#fff4e6;--hot:#ff7a3d;--sea:#3fc1c9;--panel:rgba(12,22,32,.82);box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}
+:root:not([data-theme="light"]){color-scheme:dark}
+:root[data-theme="dark"]{--bg:#14202b}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){--bg:#14202b}}
+html{scroll-padding-top:env(safe-area-inset-top,0px)}
+html,body{height:100%;margin:0;overflow:hidden}
+body{background:var(--bg);color:var(--fg);font-family:'Heebo',system-ui,sans-serif}
+canvas{display:block;position:fixed;inset:0;width:100%;height:100%}
+#hud{position:fixed;inset:0;pointer-events:none;font-weight:800}
+#hud .tl,#hud .tr,#hud .bl,#hud .br{position:absolute;padding:10px 14px;background:var(--panel);border-radius:6px;font-size:clamp(14px,2.6vw,20px)}
+.tl{top:calc(env(safe-area-inset-top,0px) + 10px);left:10px}.tr{top:calc(env(safe-area-inset-top,0px) + 10px);right:10px;text-align:right}
+.bl{bottom:calc(env(safe-area-inset-bottom,0px) + 10px);left:10px;width:min(38vw,240px)}.br{bottom:calc(env(safe-area-inset-bottom,0px) + 10px);right:10px}
+.bar{height:10px;background:#0006;border-radius:5px;margin-top:6px;overflow:hidden}#hp{height:100%;width:100%;background:var(--sea);transition:width .15s}
+#cross{position:absolute;left:50%;top:50%;width:22px;height:22px;margin:-11px 0 0 -11px}
+#cross:before,#cross:after{content:"";position:absolute;background:var(--fg);left:10px;top:0;width:2px;height:22px;opacity:.85}
+#cross:after{left:0;top:10px;width:22px;height:2px}
+#cross.hit:before,#cross.hit:after{background:var(--hot)}
+#flash{position:absolute;inset:0;background:radial-gradient(transparent 40%,#e02020);opacity:0;transition:opacity .25s}
+#ov{position:fixed;inset:0;display:flex;align-items:center;justify-content:center;background:linear-gradient(180deg,#1b2d3c ,#5a3a3a 70%,#ff7a3d);text-align:center;padding:20px}
+#ov>div{max-width:520px}
+h1{font-size:clamp(32px,8vw,64px);margin:0 0 6px;line-height:1}
+p{margin:8px 0;line-height:1.5}
+button{font:800 20px 'Heebo',system-ui,sans-serif;padding:14px 34px;margin-top:14px;border:0;border-radius:6px;background:var(--hot);color:#1a0d05;cursor:pointer}
+button:focus-visible{outline:3px solid var(--fg);outline-offset:3px}
+small{opacity:.8}
+</style>
+</head>
+<body>
+<div id="hud" hidden>
+  <div class="tl">Gelombang <span id="wv">1</span> · Robot <span id="left">0</span></div>
+  <div class="tr">Skor <span id="sc">0</span></div>
+  <div class="bl">Nyawa<div class="bar"><div id="hp"></div></div></div>
+  <div class="br"><small>AK-47 · Aim assist <span id="as">ON</span> (T)</small><br><span id="ammo">30</span> / 30 <small id="rl"></small></div>
+  <div id="cross"></div><div id="flash"></div>
+</div>
+<div id="ov"><div>
+  <h1>Senja di Tel Aviv</h1>
+  <p>Robot rongsokan liar menyerbu kota putih di tepi laut. Bertahanlah dari gelombang ke gelombang di antara gedung Bauhaus, bundaran Dizengoff, dan pantai.</p>
+  <p><small>WASD gerak · Mouse arahkan · Klik tahan tembak · R isi ulang · T aim assist · Shift lari · Spasi lompat<br>Senjata: AK-47 dengan aim assist sangat kuat. Geser crosshair ke arah robot dan bidikan akan tersedot ke kepalanya. Jika kursor tidak terkunci: tahan klik dan geser mouse untuk melihat sekitar.</small></p>
+  <button id="go">Mulai</button>
+</div></div>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script>
+const $=id=>document.getElementById(id);
+const renderer=new THREE.WebGLRenderer({antialias:true});
+renderer.setPixelRatio(Math.min(devicePixelRatio,2));
+document.body.prepend(renderer.domElement);
+const scene=new THREE.Scene();
+// sky
+(function(){const c=document.createElement('canvas');c.width=4;c.height=256;const g=c.getContext('2d'),gr=g.createLinearGradient(0,0,0,256);
+gr.addColorStop(0,'#26405c');gr.addColorStop(.55,'#c8667a');gr.addColorStop(.85,'#ff9a52');gr.addColorStop(1,'#ffd08a');g.fillStyle=gr;g.fillRect(0,0,4,256);scene.background=new THREE.CanvasTexture(c)})();
+scene.fog=new THREE.Fog(0xf0a880,40,190);
+const camera=new THREE.PerspectiveCamera(72,1,.1,400);scene.add(camera);
+scene.add(new THREE.HemisphereLight(0xffd7b0,0x3a4a5a,.85));
+const sun=new THREE.DirectionalLight(0xffb070,.9);sun.position.set(-40,30,60);scene.add(sun);
+function resize(){renderer.setSize(innerWidth,innerHeight);camera.aspect=innerWidth/innerHeight;camera.updateProjectionMatrix()}
+addEventListener('resize',resize);resize();
+
+let s=11;const rnd=()=>(s=(s*16807)%2147483647)/2147483647;
+const colliders=[],shootables=[];
+const M=(c,o)=>new THREE.MeshLambertMaterial(Object.assign({color:c},o||{}));
+// facade texture
+const fc=document.createElement('canvas');fc.width=fc.height=64;
+(function(){const g=fc.getContext('2d');g.fillStyle='#f4efe6';g.fillRect(0,0,64,64);g.fillStyle='#3d5568';
+for(let x=0;x<2;x++)for(let y=0;y<2;y++)g.fillRect(6+x*32,8+y*32,20,16);g.fillStyle='#d9d1c3';g.fillRect(0,30,64,2);g.fillRect(0,62,64,2)})();
+const facade=new THREE.CanvasTexture(fc);facade.wrapS=facade.wrapT=THREE.RepeatWrapping;
+function addBox(x,z,w,d,h){
+  const t=facade.clone();t.needsUpdate=true;t.repeat.set(Math.max(1,w/5),Math.max(1,h/5));
+  const m=new THREE.Mesh(new THREE.BoxGeometry(w,h,d),M(0xffffff,{map:t}));
+  m.position.set(x,h/2,z);scene.add(m);shootables.push(m);colliders.push({x,z,hw:w/2,hd:d/2});
+  const roof=new THREE.Mesh(new THREE.BoxGeometry(w*.5,1.2,d*.5),M(0xb9b2a6));roof.position.set(x,h+.6,z);scene.add(roof);
+}
+// ground
+const ground=new THREE.Mesh(new THREE.PlaneGeometry(300,300),M(0x55595e));ground.rotation.x=-Math.PI/2;scene.add(ground);
+const sand=new THREE.Mesh(new THREE.PlaneGeometry(300,26),M(0xe8cf9b));sand.rotation.x=-Math.PI/2;sand.position.set(0,.02,100);scene.add(sand);
+const sea=new THREE.Mesh(new THREE.PlaneGeometry(400,200),M(0x2a8fa8));sea.rotation.x=-Math.PI/2;sea.position.set(0,.03,213);scene.add(sea);
+// blocks
+for(let i=-3;i<=3;i++)for(let j=-3;j<=3;j++){
+  if(i===0&&j===0)continue;
+  const cx=i*24,cz=j*24;
+  if(rnd()<.5){addBox(cx,cz,12+rnd()*3,12+rnd()*3,9+rnd()*14)}
+  else{addBox(cx-4.5,cz,6.5,13,8+rnd()*10);addBox(cx+4.5,cz,6.5,13,10+rnd()*12)}
+}
+// Dizengoff-style plaza
+const fountain=new THREE.Mesh(new THREE.CylinderGeometry(4,4.5,1.4,24),M(0xe9e4da));fountain.position.set(0,.7,0);scene.add(fountain);
+const water=new THREE.Mesh(new THREE.CylinderGeometry(3.4,3.4,.2,24),M(0x3fc1c9));water.position.set(0,1.45,0);scene.add(water);
+colliders.push({x:0,z:0,hw:4.5,hd:4.5});shootables.push(fountain);
+// palms
+function palm(x,z){const g=new THREE.Group(),h=5+rnd()*2;
+  const t=new THREE.Mesh(new THREE.CylinderGeometry(.18,.3,h,6),M(0x7a5a3a));t.position.y=h/2;g.add(t);
+  for(let k=0;k<6;k++){const l=new THREE.Mesh(new THREE.BoxGeometry(.4,.08,3.2),M(0x2f7d4a));l.position.y=h;l.rotation.y=k*1.05;l.rotation.x=.4;l.translateZ(1.4);g.add(l)}
+  g.position.set(x,0,z);scene.add(g)}
+for(let x=-84;x<=84;x+=12)palm(x+rnd()*3,88+rnd()*3);
+for(let k=0;k<26;k++){const gx=(Math.floor(rnd()*7)-3)*24+12,gz=(Math.floor(rnd()*7)-3)*24+12;palm(gx+rnd()*4-2,gz+rnd()*4-2)}
+// Azrieli-style towers (backdrop)
+const glass=M(0x7fa2b8);
+[[-45,new THREE.CylinderGeometry(11,11,150,32)],[0,new THREE.BoxGeometry(20,150,20)],[45,new THREE.CylinderGeometry(13,13,150,3)]].forEach(([x,g])=>{
+  const m=new THREE.Mesh(g,glass);m.position.set(x,75,-125);scene.add(m)});
+// tracers
+const tracers=[];
+function tracer(a,b,col){const g=new THREE.BufferGeometry().setFromPoints([a,b]);const l=new THREE.Line(g,new THREE.LineBasicMaterial({color:col,transparent:true}));scene.add(l);tracers.push({l,t:.08})}
+// audio
+let ac;function beep(f,d,type,v){try{ac=ac||new (window.AudioContext||window.webkitAudioContext)();const o=ac.createOscillator(),g=ac.createGain();o.type=type||'square';o.frequency.setValueAtTime(f,ac.currentTime);o.frequency.exponentialRampToValueAtTime(Math.max(30,f/3),ac.currentTime+d);g.gain.setValueAtTime(v||.06,ac.currentTime);g.gain.exponentialRampToValueAtTime(.001,ac.currentTime+d);o.connect(g).connect(ac.destination);o.start();o.stop(ac.currentTime+d)}catch(e){}}
+// weapon
+const gun=new THREE.Group();
+const part=(w,h,d,x,y,z,c,rx)=>{const m=new THREE.Mesh(new THREE.BoxGeometry(w,h,d),M(c));m.position.set(x,y,z);if(rx)m.rotation.x=rx;gun.add(m);return m};
+part(.09,.11,.5,.26,-.25,-.55,0x2a2d31);      // receiver
+part(.035,.035,.6,.26,-.2,-1.05,0x1a1c1f);    // barrel
+part(.085,.08,.32,.26,-.235,-.86,0x8a4b22);   // wooden handguard
+part(.07,.13,.4,.26,-.28,-.2,0x8a4b22);       // wooden stock
+part(.06,.3,.11,.26,-.43,-.62,0x1f2124,.35);  // curved magazine
+part(.02,.05,.02,.26,-.16,-1.3,0x1a1c1f);     // front sight
+const flash=part(.09,.09,.12,.26,-.2,-1.4,0xffb347);flash.material=new THREE.MeshBasicMaterial({color:0xffc060});flash.visible=false;
+camera.add(gun);
+function resolve(p,r){colliders.forEach(c=>{const dx=p.x-c.x,dz=p.z-c.z,ox=c.hw+r-Math.abs(dx),oz=c.hd+r-Math.abs(dz);
+  if(ox>0&&oz>0){if(ox<oz)p.x+=Math.sign(dx||1)*ox;else p.z+=Math.sign(dz||1)*oz}})}
+
+// state
+const P={pos:new THREE.Vector3(0,1.7,14),vy:0,yaw:0,pitch:0,hp:100,ammo:30,reload:0,cool:0,kick:0};
+let enemies=[],wave=0,score=0,toSpawn=0,spawnT=0,playing=false,locked=false,down=false;
+const keys={};
+addEventListener('keydown',e=>{keys[e.code]=true;if(e.code==='KeyR'&&playing)startReload();if(e.code==='KeyT'){assistOn=!assistOn;$('as').textContent=assistOn?'ON':'OFF'}});
+addEventListener('keyup',e=>keys[e.code]=false);
+document.addEventListener('pointerlockchange',()=>{locked=document.pointerLockElement===renderer.domElement});
+addEventListener('mousedown',e=>{if(playing&&e.button===0)down=true});
+addEventListener('mouseup',()=>down=false);
+addEventListener('mousemove',e=>{if(!playing||!(locked||down))return;
+  P.yaw-=e.movementX*.0022;P.pitch=Math.max(-1.4,Math.min(1.4,P.pitch-e.movementY*.0022))});
+function startReload(){if(P.reload<=0&&P.ammo<30){P.reload=1.6;$('rl').textContent='mengisi…'}}
+
+function makeEnemy(){
+  const g=new THREE.Group();
+  const body=new THREE.Mesh(new THREE.BoxGeometry(.9,1.1,.55),M(0x59616b));body.position.y=1.15;
+  const head=new THREE.Mesh(new THREE.BoxGeometry(.5,.4,.45),M(0x300000,{emissive:0xff2a1a}));head.position.y=1.95;
+  const legs=new THREE.Mesh(new THREE.BoxGeometry(.7,.6,.4),M(0x3a4148));legs.position.y=.3;
+  const arm=new THREE.Mesh(new THREE.BoxGeometry(.2,.2,.8),M(0x22262b));arm.position.set(.6,1.3,.3);
+  [body,head,legs,arm].forEach(m=>g.add(m));
+  const a=Math.random()*6.283,r=55+Math.random()*25;
+  g.position.set(Math.max(-88,Math.min(88,P.pos.x+Math.cos(a)*r)),0,Math.max(-88,Math.min(88,P.pos.z+Math.sin(a)*r)));
+  resolve(g.position,1.2);
+  g.userData={hp:60+wave*6,speed:3+wave*.25,fire:1+Math.random()*2};
+  scene.add(g);enemies.push(g);
+}
+function nextWave(){wave++;toSpawn=3+wave*2;P.hp=Math.min(100,P.hp+30);$('wv').textContent=wave}
+const ray=new THREE.Raycaster();
+function killIf(n){if(n.userData.hp<=0&&enemies.includes(n)){scene.remove(n);enemies.splice(enemies.indexOf(n),1);score+=100;$('sc').textContent=score;beep(120,.25,'sawtooth',.08)}}
+function hitMark(){$('cross').classList.add('hit');setTimeout(()=>$('cross').classList.remove('hit'),90);beep(600,.06,'sine',.05)}
+function shoot(){
+  P.ammo--;P.cool=.1;P.kick=1;beep(190,.09,'sawtooth',.05);
+  const d=new THREE.Vector3();camera.getWorldDirection(d);
+  const o=camera.position.clone().addScaledVector(d,.5);o.y-=.2;
+  let end=camera.position.clone().addScaledVector(d,80);
+  if(assistOn&&target&&target.a<.2){ // aim assist: peluru menempel ke kepala
+    target.e.userData.hp-=50;end=target.h.clone();hitMark();killIf(target.e);
+  }else{
+    ray.setFromCamera({x:0,y:0},camera);ray.far=200;
+    const hits=ray.intersectObjects(shootables.concat(enemies),true);
+    if(hits.length){end=hits[0].point;let n=hits[0].object;while(n&&!(n.userData&&n.userData.hp!==undefined))n=n.parent;
+      if(n&&enemies.includes(n)){n.userData.hp-=(hits[0].object.position.y>1.8?50:24);hitMark();killIf(n)}}
+  }
+  tracer(o,end,0xffd08a);
+  if(P.ammo<=0)startReload();
+}
+// aim assist kuat: cari kepala musuh terdekat dari crosshair, tarik bidikan ke sana
+let assistOn=true,target=null;
+function findTarget(){
+  const fwd=new THREE.Vector3();camera.getWorldDirection(fwd);let best=null,ba=.5;
+  enemies.forEach(e=>{const h=new THREE.Vector3(e.position.x,1.95,e.position.z),v=h.clone().sub(camera.position),dist=v.length(),a=fwd.angleTo(v);
+    if(a<ba&&dist<75&&losClear(camera.position,h)){ba=a;best={e,h,a}}});
+  return best}
+function applyAssist(dt){
+  if(!assistOn){target=null;return}
+  target=findTarget();if(!target)return;
+  const v=target.h.clone().sub(camera.position),hd=Math.hypot(v.x,v.z);
+  let dy=Math.atan2(-v.x,-v.z)-P.yaw;dy=Math.atan2(Math.sin(dy),Math.cos(dy));
+  const dp=Math.atan2(v.y,hd)-P.pitch,f=1-Math.exp(-(down?26:7)*dt);
+  P.yaw+=dy*f;P.pitch+=dp*f}
+function losClear(from,to){const dir=to.clone().sub(from),dist=dir.length();dir.normalize();
+  const r=new THREE.Raycaster(from,dir,0,dist);return r.intersectObjects(shootables,false).length===0}
+
+const clock=new THREE.Clock();
+function update(dt){
+  // move
+  const sp=(keys.ShiftLeft?11:7)*dt;let fx=0,fz=0;
+  if(keys.KeyW||keys.ArrowUp)fz-=1;if(keys.KeyS||keys.ArrowDown)fz+=1;if(keys.KeyA||keys.ArrowLeft)fx-=1;if(keys.KeyD||keys.ArrowRight)fx+=1;
+  const l=Math.hypot(fx,fz)||1,cy=Math.cos(P.yaw),sy=Math.sin(P.yaw);
+  P.pos.x+=(fx*cy+fz*sy)/l*sp*(fx||fz?1:0);P.pos.z+=(-fx*sy+fz*cy)/l*sp*(fx||fz?1:0);
+  if(keys.Space&&P.pos.y<=1.71)P.vy=7;P.vy-=20*dt;P.pos.y=Math.max(1.7,P.pos.y+P.vy*dt);if(P.pos.y<=1.7)P.vy=0;
+  resolve(P.pos,.5);P.pos.x=Math.max(-90,Math.min(90,P.pos.x));P.pos.z=Math.max(-90,Math.min(96,P.pos.z));
+  applyAssist(dt);camera.position.copy(P.pos);camera.rotation.order='YXZ';camera.rotation.set(P.pitch,P.yaw,0);
+  P.kick=Math.max(0,P.kick-dt*8);gun.position.z=P.kick*.06;gun.rotation.x=P.kick*.05;flash.visible=P.kick>.75;
+  // weapon
+  P.cool-=dt;
+  if(P.reload>0){P.reload-=dt;if(P.reload<=0){P.ammo=30;$('rl').textContent=''}}
+  else if(down&&P.cool<=0&&P.ammo>0)shoot();
+  // spawn
+  if(toSpawn>0){spawnT-=dt;if(spawnT<=0){makeEnemy();toSpawn--;spawnT=.9}}
+  else if(!enemies.length)nextWave();
+  // enemies
+  enemies.forEach(e=>{const u=e.userData,dx=P.pos.x-e.position.x,dz=P.pos.z-e.position.z,dist=Math.hypot(dx,dz);
+    e.rotation.y=Math.atan2(dx,dz);
+    if(dist>11){e.position.x+=dx/dist*u.speed*dt;e.position.z+=dz/dist*u.speed*dt;resolve(e.position,.6)}
+    e.children[0].position.y=1.15+Math.sin(performance.now()/120+u.fire*9)*.05;
+    u.fire-=dt;
+    if(u.fire<=0&&dist<32){u.fire=1.2+Math.random()*1.2;
+      const from=new THREE.Vector3(e.position.x,1.6,e.position.z);
+      if(losClear(from,P.pos)){tracer(from,P.pos.clone().add(new THREE.Vector3((Math.random()-.5)*2,-.3,0)),0xff3a2a);
+        if(Math.random()<.5){P.hp-=7;beep(90,.15,'sawtooth',.07);$('flash').style.opacity=.8;setTimeout(()=>$('flash').style.opacity=0,120)}}}
+  });
+  tracers.forEach((t,i)=>{t.t-=dt;t.l.material.opacity=Math.max(0,t.t/.08);if(t.t<=0){scene.remove(t.l);tracers.splice(i,1)}});
+  $('hp').style.width=Math.max(0,P.hp)+'%';$('ammo').textContent=P.ammo;$('left').textContent=enemies.length+toSpawn;
+  if(P.hp<=0)die();
+}
+function die(){playing=false;down=false;document.exitPointerLock&&document.exitPointerLock();
+  $('ov').style.display='flex';$('ov').querySelector('h1').textContent='Kamu Kalah';
+  $('ov').querySelector('p').textContent='Kamu bertahan sampai gelombang '+wave+' dengan skor '+score+'.';
+  $('go').textContent='Main lagi'}
+function begin(){
+  enemies.forEach(e=>scene.remove(e));enemies=[];wave=0;score=0;toSpawn=0;
+  Object.assign(P,{hp:100,ammo:30,reload:0,vy:0,yaw:0,pitch:0});P.pos.set(0,1.7,14);$('sc').textContent=0;$('rl').textContent='';
+  nextWave();P.hp=100;$('ov').style.display='none';$('hud').hidden=false;playing=true;clock.getDelta();
+  try{const r=renderer.domElement.requestPointerLock();if(r&&r.catch)r.catch(()=>{})}catch(e){}
+  beep(300,.1,'sine',.03);
+}
+$('go').onclick=begin;
+function loop(){requestAnimationFrame(loop);const dt=Math.min(clock.getDelta(),.05);if(playing)update(dt);renderer.render(scene,camera)}
+loop();
+</script>
+</body>
+</html>
